@@ -1,0 +1,22 @@
+From: Dr. Jonathan Hayes <jhayes@stjudehealthsystem.org>
+To: rfq@formpilot.io
+Subject: HIPAA Compliant Intake Automation - St Jude Health System
+
+Dear Enterprise Inquiries,
+
+I am Dr. Jonathan Hayes, Chief Medical Information Officer at St Jude Health System.
+We are reviewing vendors for our inbound clinical referral automation pipeline across 12 hospitals.
+
+Scope:
+- Estimated volume: 500 clinical coordinators and intake specialists.
+- Compliance: Strict HIPAA Business Associate Agreement (BAA) and end-to-end data encryption.
+- Integration: Direct bi-directional synchronization with our Salesforce Health Cloud deployment.
+- Budget: Board approved $300,000 capital expenditure.
+- Urgency: P0 deployment target. Go-live planned for next month.
+
+Please provide confirmation of your BAA execution process and available time slots for our vendor review board.
+
+Sincerely,
+Dr. Jonathan Hayes
+CMIO, St Jude Health System
+jhayes@stjudehealthsystem.org

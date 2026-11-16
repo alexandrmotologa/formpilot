@@ -1,0 +1,24 @@
+From: Marcus Vance <m.vance@apexclearing.com>
+To: sales@formpilot.io
+Subject: Enterprise RFP: Inbound Data Pipeline for 250 FinTech Seats
+Date: Tue, 17 Nov 2026 09:15:00 +0000
+Content-Type: text/plain; charset="utf-8"
+
+Hi Sales Team,
+
+I am Marcus Vance, VP of Engineering at Apex Clearing (apexclearing.com).
+We are currently evaluating enterprise ingestion platforms to automate our incoming partner trade orders and unstructured RFQ sheets.
+
+Key Requirements:
+- Seat count: We need 250 enterprise seats for our operations and trading desk.
+- Products: Automated entity extraction, custom CRM integration, and audit logs.
+- Security & Compliance: Must support SOC2 Type II, dedicated VPC, and SAML SSO with Okta.
+- Budget: Allocated budget is $120,000 for annual licensing.
+- Timeline: This is an immediate Q4 initiative; we want to complete procurement within 30 days.
+
+Please send over your standard enterprise MSA, security whitepaper, and let me know when we can schedule a technical demo with our architecture committee this Thursday.
+
+Best regards,
+Marcus Vance
+VP of Engineering | Apex Clearing
+Phone: +1 (415) 890-3421

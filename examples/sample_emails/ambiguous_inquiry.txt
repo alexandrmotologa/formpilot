@@ -1,0 +1,11 @@
+From: alex.dev99@gmail.com
+To: info@formpilot.io
+Subject: Question about features
+
+Hey,
+
+Just curious how your product works. Does it support webhooks?
+Can I test it for a small side project with 2 friends?
+
+Thanks,
+Alex

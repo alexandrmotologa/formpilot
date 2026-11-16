@@ -1,0 +1,33 @@
+# Binaries
+bin/
+formpilot
+formpilot.exe
+*.exe
+
+# Database and state files
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+data/
+
+# Go build artifacts
+vendor/
+*.test
+*.out
+
+# Node and frontend build
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Environment and secrets
+.env
+.env.local
+*.secret.yaml
+
+# IDE and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

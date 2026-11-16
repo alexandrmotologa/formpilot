@@ -1,0 +1,19 @@
+From: Elena Rostova <elena@cloudscale-analytics.io>
+To: inbound@formpilot.io
+Subject: Demo request for 45 seats - CloudScale Analytics
+
+Hello,
+
+My name is Elena Rostova and I head the Product Operations team at CloudScale Analytics (cloudscale-analytics.io).
+We are looking for a reliable way to ingest incoming customer requests and webhook notifications directly into our HubSpot instance.
+
+Our current team size needing access is roughly 45 seats. We are hoping to have something live in about 2 months before our next quarter starts.
+Our estimated budget is around $35,000 annually.
+
+Could you share a demo link or arrange a call next week?
+
+Thanks,
+Elena Rostova
+Head of Product Operations
+CloudScale Analytics
++1 650 443 9081

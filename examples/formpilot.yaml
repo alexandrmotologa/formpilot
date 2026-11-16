@@ -1,0 +1,39 @@
+server:
+  host: "0.0.0.0"
+  port: 9393
+
+database:
+  path: "formpilot.db"
+
+extraction:
+  provider: "heuristic" # "heuristic" or "llm"
+  model: "gpt-4o-mini"
+  api_key: ""
+  endpoint: ""
+
+crm:
+  mode: "mock" # "mock" or "live"
+  hubspot:
+    enabled: true
+    access_token: ""
+  salesforce:
+    enabled: false
+    instance_url: ""
+    access_token: ""
+  pipedrive:
+    enabled: false
+    api_token: ""
+
+slack:
+  enabled: false
+  webhook_url: ""
+
+icp:
+  min_qualification_score: 60
+  weights:
+    corporate_domain: 20
+    seat_volume: 25
+    seniority: 20
+    urgency: 15
+    budget: 10
+    product_fit: 10
