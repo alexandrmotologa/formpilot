@@ -85,6 +85,13 @@ func (s *DB) migrate() error {
 		outreach_draft TEXT,
 		status TEXT DEFAULT 'received',
 		latency_ms INTEGER DEFAULT 0,
+		latency_mime_ms INTEGER DEFAULT 0,
+		latency_extract_ms INTEGER DEFAULT 0,
+		latency_dedup_ms INTEGER DEFAULT 0,
+		latency_score_ms INTEGER DEFAULT 0,
+		latency_draft_ms INTEGER DEFAULT 0,
+		latency_crm_ms INTEGER DEFAULT 0,
+		latency_storage_ms INTEGER DEFAULT 0,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);

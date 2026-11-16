@@ -43,22 +43,22 @@ func GenerateOutreachDraft(lead *extractor.ExtractedLead, repName, bookingLink s
 		sb.WriteString(fmt.Sprintf("Hello %s Team,\n\n", company))
 	}
 
-	// Paragraph 1: Contextual Greeting & Role Alignment
+	// Paragraph 1: Contextual Greeting & Tone Alignment
 	switch tone {
 	case ToneConsultative:
 		sb.WriteString(fmt.Sprintf("Thank you for reaching out regarding %s's inbound data workflows. ", company))
 		if lead.JobTitle != "" {
-			sb.WriteString(fmt.Sprintf("Given your role as %s, I appreciate the operational focus on eliminating manual pipeline bottlenecks.\n\n", lead.JobTitle))
+			sb.WriteString(fmt.Sprintf("Given your role as %s, I appreciate your focus on eliminating manual pipeline friction and lead triage delays.\n\n", lead.JobTitle))
 		} else {
-			sb.WriteString("We regularly help fast-moving teams automate unstructured customer inquiries directly into their CRM records.\n\n")
+			sb.WriteString("We regularly help high-velocity sales and operations teams automate unstructured customer inquiries directly into clean CRM records.\n\n")
 		}
 
 	case ToneTechnicalValue:
-		sb.WriteString(fmt.Sprintf("Thanks for connecting with us regarding %s's pipeline requirements. ", company))
+		sb.WriteString(fmt.Sprintf("Thanks for connecting with us regarding %s's pipeline specifications. ", company))
 		if len(lead.TechStack) > 0 {
-			sb.WriteString(fmt.Sprintf("Our architecture is designed specifically for environments utilizing %s with sub-3 second latency.\n\n", strings.Join(lead.TechStack, " and ")))
+			sb.WriteString(fmt.Sprintf("Our architecture is engineered for environments running %s, executing reverse-ETL in under 3 seconds.\n\n", strings.Join(lead.TechStack, " and ")))
 		} else {
-			sb.WriteString("Our single-binary engine provides deterministic entity extraction and real-time reverse-ETL.\n\n")
+			sb.WriteString("Our single-binary Go engine provides schema-constrained extraction and sub-second deterministic deduplication.\n\n")
 		}
 
 	default: // ToneExecutiveDirect
@@ -101,11 +101,20 @@ func GenerateOutreachDraft(lead *extractor.ExtractedLead, repName, bookingLink s
 	return sb.String()
 }
 
+// ApplyDraftVariables substitutes dynamic variables inside draft templates.
+func ApplyDraftVariables(template string, vars map[string]string) string {
+	res := template
+	for k, v := range vars {
+		placeholder := "{{" + k + "}}"
+		res = strings.ReplaceAll(res, placeholder, v)
+	}
+	return res
+}
+
 func extractFirstName(fullName string) string {
 	parts := strings.Fields(fullName)
 	if len(parts) > 0 {
 		first := parts[0]
-		// Skip title prefixes like Dr., Mr., Ms.
 		if (first == "Dr." || first == "Mr." || first == "Ms." || first == "Mrs.") && len(parts) > 1 {
 			return parts[1]
 		}

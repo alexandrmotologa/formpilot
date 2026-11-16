@@ -16,8 +16,12 @@ import {
   Layers,
   FileText,
   RotateCw,
+  Split,
+  MessageSquare,
+  Wand2,
 } from 'lucide-react';
 import { Lead, ExtractedEntitiesData, SyncLog, AuditEvent } from '../types';
+import { LatencyWaterfall } from './LatencyWaterfall';
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -26,6 +30,9 @@ interface LeadDetailDrawerProps {
   onClose: () => void;
   onUpdateDraft: (leadId: string, newDraft: string) => Promise<void>;
   onResync: (leadId: string) => Promise<void>;
+  onRegenerateDraft: (leadId: string, tone: string) => Promise<void>;
+  onSendEmail: (leadId: string) => Promise<void>;
+  onOverrideDedup: (leadId: string, action: string) => Promise<void>;
 }
 
 export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
@@ -35,12 +42,19 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
   onClose,
   onUpdateDraft,
   onResync,
+  onRegenerateDraft,
+  onSendEmail,
+  onOverrideDedup,
 }) => {
   const [activeTab, setActiveTab] = useState<'entities' | 'draft' | 'crm' | 'raw' | 'audit'>('entities');
   const [draftText, setDraftText] = useState(lead?.outreach_draft || '');
+  const [selectedTone, setSelectedTone] = useState<'executive_direct' | 'consultative' | 'technical_value'>('executive_direct');
   const [isCopied, setIsCopied] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [isResyncing, setIsResyncing] = useState(false);
+  const [isOverridingDedup, setIsOverridingDedup] = useState(false);
 
   // Sync state if lead changes
   React.useEffect(() => {
@@ -85,6 +99,34 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
     }
   };
 
+  const handleRegenerate = async (tone: 'executive_direct' | 'consultative' | 'technical_value') => {
+    setSelectedTone(tone);
+    setIsRegenerating(true);
+    try {
+      await onRegenerateDraft(lead.id, tone);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
+  const handleSend = async () => {
+    setIsSendingEmail(true);
+    try {
+      await onSendEmail(lead.id);
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  const handleSplitAccount = async () => {
+    setIsOverridingDedup(true);
+    try {
+      await onOverrideDedup(lead.id, 'split_new');
+    } finally {
+      setIsOverridingDedup(false);
+    }
+  };
+
   const handleTriggerResync = async () => {
     setIsResyncing(true);
     try {
@@ -92,6 +134,10 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
     } finally {
       setIsResyncing(false);
     }
+  };
+
+  const insertVariable = (variable: string) => {
+    setDraftText((prev) => prev + `\n${variable}`);
   };
 
   return (
@@ -125,6 +171,11 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
             >
               Score: {lead.icp_score}/100 • {lead.qualification_tier}
             </span>
+            {lead.status === 'contacted' && (
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/30 flex items-center gap-1">
+                <Check className="w-3 h-3" /> Contacted
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3 text-xs text-slate-400 mt-1.5 flex-wrap">
@@ -149,7 +200,7 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
         </button>
       </div>
 
-      {/* Deduplication Status Alert Banner */}
+      {/* Deduplication Status Alert Banner with Manual Override Controls */}
       <div
         className={`px-4 py-2.5 text-xs flex items-center justify-between border-b ${
           lead.dedup_status === 'existing_matched'
@@ -162,7 +213,7 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
             <>
               <ShieldCheck className="w-4 h-4 text-purple-400 shrink-0" />
               <span>
-                <strong>CRM Deduplication Match:</strong> Associated with existing account{' '}
+                <strong>Deduplication Match:</strong> Associated with existing account{' '}
                 <strong>&quot;{lead.matched_account_name}&quot;</strong> (Owner:{' '}
                 {lead.matched_account_owner || 'Enterprise AE'}). Prevented duplicate account creation!
               </span>
@@ -177,18 +228,32 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
             </>
           )}
         </div>
-        {lead.matched_account_id && (
-          <span className="font-mono text-[11px] bg-purple-900/40 px-2 py-0.5 rounded border border-purple-800/60">
-            ID: {lead.matched_account_id}
-          </span>
-        )}
+
+        <div className="flex items-center gap-2">
+          {lead.dedup_status === 'existing_matched' && (
+            <button
+              onClick={handleSplitAccount}
+              disabled={isOverridingDedup}
+              className="flex items-center gap-1 px-2.5 py-1 bg-purple-900/60 hover:bg-purple-800 text-purple-200 rounded text-[11px] font-medium border border-purple-700/60 transition"
+              title="Split this lead from the matched account and provision a separate account"
+            >
+              <Split className="w-3 h-3" />
+              <span>{isOverridingDedup ? 'Splitting...' : 'Split to New Account'}</span>
+            </button>
+          )}
+          {lead.matched_account_id && (
+            <span className="font-mono text-[11px] bg-purple-900/40 px-2 py-0.5 rounded border border-purple-800/60">
+              ID: {lead.matched_account_id}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
       <div className="flex items-center border-b border-slate-800 bg-slate-900/50 px-4 text-xs">
         {[
-          { id: 'entities', label: 'B2B Entities & ICP' },
-          { id: 'draft', label: 'Sales Outreach Draft' },
+          { id: 'entities', label: 'B2B Entities & SLA' },
+          { id: 'draft', label: 'Sales Outreach Studio' },
           { id: 'crm', label: `CRM Dispatch (${syncLogs.length})` },
           { id: 'raw', label: 'Raw Inbound MIME' },
           { id: 'audit', label: `Audit Trail (${auditEvents.length})` },
@@ -209,9 +274,12 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* TAB 1: ENTITIES & ICP */}
+        {/* TAB 1: ENTITIES & LATENCY WATERFALL */}
         {activeTab === 'entities' && (
           <div className="space-y-4">
+            {/* Latency Waterfall Breakdown */}
+            <LatencyWaterfall lead={lead} />
+
             {/* Extracted Entity Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="bg-slate-950/60 border border-slate-800/80 rounded-lg p-3">
@@ -297,7 +365,7 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
               )}
             </div>
 
-            {/* Contact details */}
+            {/* Decision Maker Contact details */}
             <div className="bg-slate-950/60 border border-slate-800/80 rounded-lg p-4 space-y-2">
               <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
                 Verified Decision Maker
@@ -323,14 +391,60 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
         {/* TAB 2: OUTREACH DRAFT STUDIO */}
         {activeTab === 'draft' && (
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="text-xs font-semibold text-white">Personalized Sales Representative Reply Draft</h4>
-                <p className="text-[11px] text-slate-400">
-                  Contextual 3-paragraph executive response synthesized for {lead.contact_name}.
-                </p>
+            {/* Tone Selector & Variable chips */}
+            <div className="flex items-center justify-between flex-wrap gap-2 bg-slate-950 p-3 rounded-lg border border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-medium">Tone:</span>
+                {[
+                  { id: 'executive_direct', label: 'Executive Direct' },
+                  { id: 'consultative', label: 'Consultative Discovery' },
+                  { id: 'technical_value', label: 'Technical Architecture' },
+                ].map((tone) => (
+                  <button
+                    key={tone.id}
+                    onClick={() => handleRegenerate(tone.id as typeof selectedTone)}
+                    disabled={isRegenerating}
+                    className={`px-2.5 py-1 rounded text-xs transition ${
+                      selectedTone === tone.id
+                        ? 'bg-emerald-600 text-white font-semibold'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {tone.label}
+                  </button>
+                ))}
               </div>
 
+              {/* Variable Chips */}
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                <span className="text-slate-500">Insert:</span>
+                {[
+                  { label: '{{company}}', val: lead.company_name },
+                  { label: '{{seats}}', val: `${lead.requested_seats} seats` },
+                  { label: '{{cal_link}}', val: 'https://cal.com/formpilot/discovery' },
+                ].map((chip, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => insertVariable(chip.val)}
+                    className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono border border-slate-700 transition"
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Editable textarea */}
+            <textarea
+              value={draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              rows={13}
+              className="w-full p-3.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 font-sans leading-relaxed focus:outline-none focus:border-emerald-500/60"
+            />
+
+            {/* Action Bar */}
+            <div className="flex items-center justify-between pt-1">
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleCopy}
@@ -343,20 +457,32 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
                 <button
                   onClick={handleSaveDraft}
                   disabled={isSavingDraft}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition"
                 >
-                  <Send className="w-3.5 h-3.5" />
+                  <MessageSquare className="w-3.5 h-3.5" />
                   <span>{isSavingDraft ? 'Saving...' : 'Save Draft'}</span>
                 </button>
               </div>
-            </div>
 
-            <textarea
-              value={draftText}
-              onChange={(e) => setDraftText(e.target.value)}
-              rows={14}
-              className="w-full p-3.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 font-sans leading-relaxed focus:outline-none focus:border-emerald-500/60"
-            />
+              <button
+                onClick={handleSend}
+                disabled={isSendingEmail || lead.status === 'contacted'}
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg shadow-sm transition ${
+                  lead.status === 'contacted'
+                    ? 'bg-blue-600/50 text-blue-200 cursor-not-allowed'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                }`}
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>
+                  {isSendingEmail
+                    ? 'Dispatching...'
+                    : lead.status === 'contacted'
+                    ? 'Already Contacted'
+                    : 'Send Email to Prospect'}
+                </span>
+              </button>
+            </div>
           </div>
         )}
 

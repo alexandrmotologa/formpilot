@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +12,9 @@ import (
 	"time"
 
 	"github.com/alexandrmotologa/formpilot/internal/config"
+	"github.com/alexandrmotologa/formpilot/internal/extractor"
 	"github.com/alexandrmotologa/formpilot/internal/receiver"
+	"github.com/alexandrmotologa/formpilot/internal/scorer"
 	"github.com/alexandrmotologa/formpilot/internal/storage"
 )
 
@@ -52,15 +55,27 @@ func (s *Server) Routes() http.Handler {
 
 	// Lead Management API
 	mux.HandleFunc("GET /api/v1/leads", s.handleListLeads)
+	mux.HandleFunc("GET /api/v1/leads/export", s.handleExportLeads)
+	mux.HandleFunc("POST /api/v1/leads/recalculate-all", s.handleRecalculateAll)
 	mux.HandleFunc("GET /api/v1/leads/{id}", s.handleGetLead)
 	mux.HandleFunc("PUT /api/v1/leads/{id}/draft", s.handleUpdateDraft)
+	mux.HandleFunc("POST /api/v1/leads/{id}/regenerate-draft", s.handleRegenerateDraft)
+	mux.HandleFunc("POST /api/v1/leads/{id}/send-email", s.handleSendEmail)
+	mux.HandleFunc("POST /api/v1/leads/{id}/override-dedup", s.handleOverrideDedup)
 	mux.HandleFunc("POST /api/v1/leads/{id}/sync", s.handleResyncLead)
 
 	// Accounts Deduplication Cache
 	mux.HandleFunc("GET /api/v1/accounts", s.handleListAccounts)
 
+	// ICP Rules Configuration
+	mux.HandleFunc("GET /api/v1/config/icp", s.handleGetICPConfig)
+	mux.HandleFunc("PUT /api/v1/config/icp", s.handleUpdateICPConfig)
+
 	// Inbound Simulator
 	mux.HandleFunc("POST /api/v1/simulate", s.handleSimulate)
+
+	// Webhook Gateway Info & Documentation
+	mux.HandleFunc("GET /api/v1/webhooks/info", s.handleWebhookInfo)
 
 	// Webhook Receivers
 	mux.HandleFunc("POST /api/v1/webhooks/sendgrid", s.handleSendGridWebhook)
@@ -103,7 +118,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"memory_alloc_mb": fmt.Sprintf("%.2f MB", allocMB),
 		"memory_sys_mb":   fmt.Sprintf("%.2f MB", sysMB),
 		"memory_target":   "< 15.00 MB",
-		"within_budget":   sysMB < 25.0, // target is low memory single binary
+		"within_budget":   sysMB < 25.0,
 		"goroutines":      runtime.NumGoroutine(),
 		"crm_mode":        s.cfg.CRM.Mode,
 		"extraction_mode": s.cfg.Extraction.Provider,
@@ -152,6 +167,58 @@ func (s *Server) handleListLeads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(leads)
+}
+
+func (s *Server) handleExportLeads(w http.ResponseWriter, r *http.Request) {
+	format := r.URL.Query().Get("format")
+	tier := r.URL.Query().Get("tier")
+
+	leads, err := s.db.ListAllLeads(tier)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"formpilot_leads_export.csv\"")
+
+		cw := csv.NewWriter(w)
+		_ = cw.Write([]string{
+			"ID", "ReceivedAt", "Source", "Company", "Domain", "ContactName",
+			"Email", "Phone", "Seats", "Budget", "Urgency", "ICPScore", "Tier",
+			"DedupStatus", "MatchedAccount", "Status", "LatencyMs",
+		})
+
+		for _, l := range leads {
+			_ = cw.Write([]string{
+				l.ID,
+				l.ReceivedAt.Format(time.RFC3339),
+				l.Source,
+				l.CompanyName,
+				l.Domain,
+				l.ContactName,
+				l.ContactEmail,
+				l.ContactPhone,
+				strconv.Itoa(l.RequestedSeats),
+				fmt.Sprintf("%.2f", l.Budget),
+				l.Urgency,
+				strconv.Itoa(l.ICPScore),
+				l.QualificationTier,
+				l.DedupStatus,
+				l.MatchedAccountName,
+				l.Status,
+				strconv.FormatInt(l.LatencyMs, 10),
+			})
+		}
+		cw.Flush()
+		return
+	}
+
+	// JSON format export
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"formpilot_leads_export.json\"")
 	_ = json.NewEncoder(w).Encode(leads)
 }
 
@@ -213,6 +280,230 @@ func (s *Server) handleUpdateDraft(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(lead)
 }
 
+func (s *Server) handleRegenerateDraft(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	lead, err := s.db.GetLead(id)
+	if err != nil || lead == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	var req struct {
+		Tone        string `json:"tone"` // "executive_direct", "consultative", "technical_value"
+		RepName     string `json:"rep_name"`
+		BookingLink string `json:"booking_link"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	tone := scorer.ToneExecutiveDirect
+	switch req.Tone {
+	case "consultative":
+		tone = scorer.ToneConsultative
+	case "technical_value":
+		tone = scorer.ToneTechnicalValue
+	}
+
+	var extLead extractor.ExtractedLead
+	_ = json.Unmarshal([]byte(lead.ExtractedEntities), &extLead)
+
+	newDraft := scorer.GenerateOutreachDraft(&extLead, req.RepName, req.BookingLink, tone)
+	lead.OutreachDraft = newDraft
+
+	_ = s.db.UpdateLead(lead)
+	_ = s.db.InsertAuditEvent(&storage.AuditEvent{
+		ID:      fmt.Sprintf("aud_%d", time.Now().UnixNano()),
+		LeadID:  lead.ID,
+		Stage:   "draft_studio",
+		Event:   "draft_regenerated",
+		Details: fmt.Sprintf("Regenerated with tone %s", req.Tone),
+	})
+
+	s.sse.Broadcast("lead.draft_updated", lead)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(lead)
+}
+
+func (s *Server) handleSendEmail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	lead, err := s.db.GetLead(id)
+	if err != nil || lead == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	lead.Status = "contacted"
+	_ = s.db.UpdateLead(lead)
+
+	_ = s.db.InsertAuditEvent(&storage.AuditEvent{
+		ID:      fmt.Sprintf("aud_%d", time.Now().UnixNano()),
+		LeadID:  lead.ID,
+		Stage:   "outreach",
+		Event:   "email_dispatched",
+		Details: fmt.Sprintf("Sales outreach email sent to %s", lead.ContactEmail),
+	})
+
+	s.sse.Broadcast("lead.processed", lead)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "sent",
+		"lead_id": lead.ID,
+		"sent_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func (s *Server) handleOverrideDedup(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	lead, err := s.db.GetLead(id)
+	if err != nil || lead == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	var req struct {
+		Action    string `json:"action"` // "split_new" or "link_account"
+		AccountID string `json:"account_id"`
+		Name      string `json:"name"`
+		Owner     string `json:"owner"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Action == "split_new" {
+		lead.DedupStatus = "new_account"
+		lead.MatchedAccountID = ""
+		lead.MatchedAccountName = ""
+		lead.MatchedAccountOwner = ""
+	} else if req.Action == "link_account" {
+		lead.DedupStatus = "existing_matched"
+		lead.MatchedAccountID = req.AccountID
+		lead.MatchedAccountName = req.Name
+		lead.MatchedAccountOwner = req.Owner
+	}
+
+	_ = s.db.UpdateLead(lead)
+	_ = s.db.InsertAuditEvent(&storage.AuditEvent{
+		ID:      fmt.Sprintf("aud_%d", time.Now().UnixNano()),
+		LeadID:  lead.ID,
+		Stage:   "dedup_override",
+		Event:   "manual_override",
+		Details: fmt.Sprintf("Action: %s, AccountID: %s", req.Action, req.AccountID),
+	})
+
+	s.sse.Broadcast("lead.processed", lead)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(lead)
+}
+
+func (s *Server) handleGetICPConfig(w http.ResponseWriter, r *http.Request) {
+	icp := s.cfg.GetICP()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(icp)
+}
+
+func (s *Server) handleUpdateICPConfig(w http.ResponseWriter, r *http.Request) {
+	var icp config.ICPConfig
+	if err := json.NewDecoder(r.Body).Decode(&icp); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	s.cfg.UpdateICP(icp)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "updated",
+		"icp":    s.cfg.GetICP(),
+	})
+}
+
+func (s *Server) handleRecalculateAll(w http.ResponseWriter, r *http.Request) {
+	leads, err := s.db.ListAllLeads("")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	weights := s.cfg.GetICP().Weights
+	updatedCount := 0
+
+	for i := range leads {
+		l := &leads[i]
+		var ext extractor.ExtractedLead
+		if err := json.Unmarshal([]byte(l.ExtractedEntities), &ext); err == nil {
+			icp := scorer.CalculateICP(&ext, weights)
+			l.ICPScore = icp.TotalScore
+			l.QualificationTier = icp.Tier
+			_ = s.db.UpdateLead(l)
+			updatedCount++
+		}
+	}
+
+	s.sse.Broadcast("stats.updated", map[string]string{"event": "recalculated_all"})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":          "completed",
+		"leads_evaluated": updatedCount,
+	})
+}
+
+func (s *Server) handleWebhookInfo(w http.ResponseWriter, r *http.Request) {
+	host := s.cfg.Server.Host
+	if host == "0.0.0.0" {
+		host = "localhost"
+	}
+	baseURL := fmt.Sprintf("http://%s:%d", host, s.cfg.Server.Port)
+
+	info := map[string]interface{}{
+		"base_url": baseURL,
+		"webhooks": []map[string]interface{}{
+			{
+				"provider":     "Generic REST API",
+				"endpoint":     baseURL + "/api/v1/webhooks/generic",
+				"method":       "POST",
+				"content_type": "application/json",
+				"curl_sample":  fmt.Sprintf("curl -X POST %s/api/v1/webhooks/generic -H \"Content-Type: application/json\" -d '{\"sender\":\"marcus@apexclearing.com\",\"subject\":\"Enterprise Quote 250 Seats\",\"body\":\"Looking for 250 seats with SOC2 compliance. Budget is $120,000.\"}'", baseURL),
+			},
+			{
+				"provider":     "SendGrid Inbound Parse",
+				"endpoint":     baseURL + "/api/v1/webhooks/sendgrid",
+				"method":       "POST",
+				"content_type": "multipart/form-data",
+				"curl_sample":  fmt.Sprintf("curl -X POST %s/api/v1/webhooks/sendgrid -F \"from=marcus@apexclearing.com\" -F \"to=sales@formpilot.io\" -F \"subject=Enterprise RFQ\" -F \"text=We need 250 seats immediately.\"", baseURL),
+			},
+			{
+				"provider":     "Postmark Inbound",
+				"endpoint":     baseURL + "/api/v1/webhooks/postmark",
+				"method":       "POST",
+				"content_type": "application/json",
+				"curl_sample":  fmt.Sprintf("curl -X POST %s/api/v1/webhooks/postmark -H \"Content-Type: application/json\" -d '{\"From\":\"elena@cloudscale.io\",\"To\":\"leads@formpilot.io\",\"Subject\":\"Demo Request\",\"TextBody\":\"We need 45 seats for HubSpot.\"}'", baseURL),
+			},
+			{
+				"provider":     "Mailgun Inbound",
+				"endpoint":     baseURL + "/api/v1/webhooks/mailgun",
+				"method":       "POST",
+				"content_type": "multipart/form-data",
+				"curl_sample":  fmt.Sprintf("curl -X POST %s/api/v1/webhooks/mailgun -F \"sender=jhayes@stjudehealthsystem.org\" -F \"recipient=rfq@formpilot.io\" -F \"subject=HIPAA Intake RFP\" -F \"body-plain=Scope: 500 coordinators. Budget: $300,000.\"", baseURL),
+			},
+			{
+				"provider":     "AWS SES (SNS Notification)",
+				"endpoint":     baseURL + "/api/v1/webhooks/ses",
+				"method":       "POST",
+				"content_type": "application/json",
+				"curl_sample":  fmt.Sprintf("curl -X POST %s/api/v1/webhooks/ses -H \"Content-Type: application/json\" -d '{\"Type\":\"Notification\",\"Message\":\"{\\\"mail\\\":{\\\"source\\\":\\\"marcus@apexclearing.com\\\",\\\"commonHeaders\\\":{\\\"subject\\\":\\\"Enterprise RFQ\\\"}},\\\"content\\\":\\\"From: marcus@apexclearing.com\\\\nSubject: RFP\\\\n\\\\nNeed 250 seats.\\\"}\"}'", baseURL),
+			},
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(info)
+}
+
 func (s *Server) handleResyncLead(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	lead, err := s.db.GetLead(id)
@@ -221,7 +512,6 @@ func (s *Server) handleResyncLead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trigger pipeline re-dispatch
 	if s.pipeline != nil {
 		payload := &receiver.InboundPayload{
 			Source:     lead.Source,
@@ -287,7 +577,7 @@ Phone: +1 650 443 9081`,
 I am Dr. Jonathan Hayes, Chief Medical Information Officer at St Jude Health System (stjudehealthsystem.org).
 Scope: 500 clinical coordinators.
 Compliance: Strict HIPAA BAA required. Integration with Salesforce Health Cloud.
-Budget: Board approved $300,000.
+Budget: Board approved $300,000 capital expenditure.
 Urgency: P0 immediate deployment.`,
 		}
 

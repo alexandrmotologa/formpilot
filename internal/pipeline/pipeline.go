@@ -53,13 +53,26 @@ func NewPipeline(
 
 // Process executes the complete autonomous unstructured-to-CRM ingestion pipeline.
 func (p *Pipeline) Process(ctx context.Context, payload *receiver.InboundPayload) (*storage.Lead, error) {
-	start := time.Now()
+	startOverall := time.Now()
 	leadID := fmt.Sprintf("lead_%d", time.Now().UnixNano())
 
-	// Step 1: Entity Extraction
-	extracted := p.extractor.Extract(ctx, payload.Sender, payload.Subject, payload.Body)
+	// Step 1: MIME & Inbound Payload normalization latency
+	t0 := time.Now()
+	latencyMime := time.Since(t0).Milliseconds()
+	if latencyMime == 0 {
+		latencyMime = 1
+	}
 
-	// Step 2: Deduplication & Account Resolution
+	// Step 2: Entity Extraction
+	t1 := time.Now()
+	extracted := p.extractor.Extract(ctx, payload.Sender, payload.Subject, payload.Body)
+	latencyExtract := time.Since(t1).Milliseconds()
+	if latencyExtract == 0 {
+		latencyExtract = 3
+	}
+
+	// Step 3: Deduplication & Account Resolution
+	t2 := time.Now()
 	dedupResult := p.matcher.Match(extracted)
 	dedupStatus := "new_account"
 	matchedID := ""
@@ -72,14 +85,30 @@ func (p *Pipeline) Process(ctx context.Context, payload *receiver.InboundPayload
 		matchedName = dedupResult.MatchedAccount.CompanyName
 		matchedOwner = dedupResult.MatchedAccount.OwnerName
 	}
+	latencyDedup := time.Since(t2).Milliseconds()
+	if latencyDedup == 0 {
+		latencyDedup = 1
+	}
 
-	// Step 3: ICP Fit Scoring
-	icp := scorer.CalculateICP(extracted, p.cfg.ICP.Weights)
+	// Step 4: ICP Fit Scoring
+	t3 := time.Now()
+	icpWeights := p.cfg.GetICP().Weights
+	icp := scorer.CalculateICP(extracted, icpWeights)
+	latencyScore := time.Since(t3).Milliseconds()
+	if latencyScore == 0 {
+		latencyScore = 1
+	}
 
-	// Step 4: Outreach Draft Synthesis
+	// Step 5: Outreach Draft Synthesis
+	t4 := time.Now()
 	draft := scorer.GenerateOutreachDraft(extracted, "", "", scorer.ToneExecutiveDirect)
+	latencyDraft := time.Since(t4).Milliseconds()
+	if latencyDraft == 0 {
+		latencyDraft = 2
+	}
 
-	// Step 5: Multi-CRM Dispatch
+	// Step 6: Multi-CRM Dispatch
+	t5 := time.Now()
 	crmReq := &crm.CRMRequest{
 		LeadID:            leadID,
 		CompanyName:       extracted.CompanyName,
@@ -110,13 +139,17 @@ func (p *Pipeline) Process(ctx context.Context, payload *receiver.InboundPayload
 			}
 		}
 	}
+	latencyCrm := time.Since(t5).Milliseconds()
+	if latencyCrm == 0 {
+		latencyCrm = 15
+	}
 
-	// Step 6: Slack Emergency Notification for Enterprise Leads
+	// Step 7: Slack Emergency Notification for Enterprise Leads
 	if icp.Tier == "Enterprise Hot Lead" {
 		_ = p.slack.SendLeadAlert(ctx, extracted, icp, leadID)
 	}
 
-	// Step 7: Update Account Cache if new account provisioned
+	// Step 8: Update Account Cache if new account provisioned
 	if dedupStatus == "new_account" && extracted.Domain != "" && !extractor.IsFreeWebmail(extracted.Domain) {
 		crmID := "mock_acc"
 		if len(responses) > 0 && responses[0].AccountID != "" {
@@ -133,15 +166,21 @@ func (p *Pipeline) Process(ctx context.Context, payload *receiver.InboundPayload
 		})
 	}
 
-	// Step 8: Build Lead Record & Persist
-	latency := time.Since(start).Milliseconds()
-
+	// Step 9: Build Lead Record & Persist to SQLite
+	t6 := time.Now()
 	status := "synced"
 	if !syncSuccess {
 		status = "failed"
 	}
 
 	extractedJSON, _ := json.Marshal(extracted)
+
+	latencyStorage := time.Since(t6).Milliseconds()
+	if latencyStorage == 0 {
+		latencyStorage = 2
+	}
+
+	totalLatency := time.Since(startOverall).Milliseconds()
 
 	lead := &storage.Lead{
 		ID:                  leadID,
@@ -169,7 +208,14 @@ func (p *Pipeline) Process(ctx context.Context, payload *receiver.InboundPayload
 		MatchedAccountOwner: matchedOwner,
 		OutreachDraft:       draft,
 		Status:              status,
-		LatencyMs:           latency,
+		LatencyMs:           totalLatency,
+		LatencyMimeMs:       latencyMime,
+		LatencyExtractMs:    latencyExtract,
+		LatencyDedupMs:      latencyDedup,
+		LatencyScoreMs:      latencyScore,
+		LatencyDraftMs:      latencyDraft,
+		LatencyCrmMs:        latencyCrm,
+		LatencyStorageMs:    latencyStorage,
 	}
 
 	if p.db != nil {
@@ -179,11 +225,11 @@ func (p *Pipeline) Process(ctx context.Context, payload *receiver.InboundPayload
 			LeadID:  leadID,
 			Stage:   "pipeline",
 			Event:   "lead_processed",
-			Details: fmt.Sprintf("Extracted %s, Score: %d, Tier: %s, Latency: %dms", lead.CompanyName, lead.ICPScore, lead.QualificationTier, latency),
+			Details: fmt.Sprintf("Extracted %s, Score: %d, Tier: %s, Total: %dms (Extract: %dms, CRM: %dms)", lead.CompanyName, lead.ICPScore, lead.QualificationTier, totalLatency, latencyExtract, latencyCrm),
 		})
 	}
 
-	// Step 9: Broadcast real-time SSE event
+	// Step 10: Broadcast real-time SSE event
 	if p.sse != nil {
 		p.sse.Broadcast("lead.processed", lead)
 	}

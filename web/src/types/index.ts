@@ -23,8 +23,15 @@ export interface Lead {
   matched_account_name?: string;
   matched_account_owner?: string;
   outreach_draft: string;
-  status: 'received' | 'parsed' | 'extracted' | 'scored' | 'synced' | 'failed';
+  status: 'received' | 'parsed' | 'extracted' | 'scored' | 'synced' | 'contacted' | 'failed';
   latency_ms: number;
+  latency_mime_ms?: number;
+  latency_extract_ms?: number;
+  latency_dedup_ms?: number;
+  latency_score_ms?: number;
+  latency_draft_ms?: number;
+  latency_crm_ms?: number;
+  latency_storage_ms?: number;
   created_at: string;
   updated_at: string;
 }
@@ -91,6 +98,7 @@ export interface StatsSummary {
   unqualified_leads: number;
   deduplicated_accounts: number;
   successful_syncs: number;
+  contacted_leads: number;
   average_latency_ms: number;
 }
 
@@ -104,4 +112,27 @@ export interface HealthInfo {
   goroutines: number;
   crm_mode: string;
   extraction_mode: string;
+}
+
+export interface ICPConfig {
+  min_qualification_score: number;
+  weights: {
+    corporate_domain: number;
+    seat_volume: number;
+    seniority: number;
+    urgency: number;
+    budget: number;
+    product_fit: number;
+  };
+}
+
+export interface WebhookInfo {
+  base_url: string;
+  webhooks: {
+    provider: string;
+    endpoint: string;
+    method: string;
+    content_type: string;
+    curl_sample: string;
+  }[];
 }

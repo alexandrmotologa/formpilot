@@ -5,11 +5,13 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
+	mu         sync.RWMutex
 	Server     ServerConfig     `yaml:"server"`
 	Database   DatabaseConfig   `yaml:"database"`
 	Extraction ExtractionConfig `yaml:"extraction"`
@@ -63,17 +65,17 @@ type SlackConfig struct {
 }
 
 type ICPConfig struct {
-	MinQualificationScore int        `yaml:"min_qualification_score"`
-	Weights               ICPWeights `yaml:"weights"`
+	MinQualificationScore int        `yaml:"min_qualification_score" json:"min_qualification_score"`
+	Weights               ICPWeights `yaml:"weights" json:"weights"`
 }
 
 type ICPWeights struct {
-	CorporateDomain int `yaml:"corporate_domain"`
-	SeatVolume      int `yaml:"seat_volume"`
-	Seniority       int `yaml:"seniority"`
-	Urgency         int `yaml:"urgency"`
-	Budget          int `yaml:"budget"`
-	ProductFit      int `yaml:"product_fit"`
+	CorporateDomain int `yaml:"corporate_domain" json:"corporate_domain"`
+	SeatVolume      int `yaml:"seat_volume" json:"seat_volume"`
+	Seniority       int `yaml:"seniority" json:"seniority"`
+	Urgency         int `yaml:"urgency" json:"urgency"`
+	Budget          int `yaml:"budget" json:"budget"`
+	ProductFit      int `yaml:"product_fit" json:"product_fit"`
 }
 
 func DefaultConfig() *Config {
@@ -118,6 +120,18 @@ func DefaultConfig() *Config {
 	}
 }
 
+func (c *Config) GetICP() ICPConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ICP
+}
+
+func (c *Config) UpdateICP(icp ICPConfig) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ICP = icp
+}
+
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
@@ -133,14 +147,12 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 
-	// Expand environment variables
 	expanded := expandEnvVars(string(data))
 
 	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
 		return nil, fmt.Errorf("parse config yaml: %w", err)
 	}
 
-	// Environment variable overrides
 	if portStr := os.Getenv("FORMPILOT_PORT"); portStr != "" {
 		if p, err := strconv.Atoi(portStr); err == nil {
 			cfg.Server.Port = p

@@ -29,8 +29,15 @@ type Lead struct {
 	MatchedAccountName  string    `json:"matched_account_name"`
 	MatchedAccountOwner string    `json:"matched_account_owner"`
 	OutreachDraft       string    `json:"outreach_draft"`
-	Status              string    `json:"status"`
+	Status              string    `json:"status"` // 'received', 'parsed', 'extracted', 'scored', 'synced', 'contacted', 'failed'
 	LatencyMs           int64     `json:"latency_ms"`
+	LatencyMimeMs       int64     `json:"latency_mime_ms"`
+	LatencyExtractMs    int64     `json:"latency_extract_ms"`
+	LatencyDedupMs      int64     `json:"latency_dedup_ms"`
+	LatencyScoreMs      int64     `json:"latency_score_ms"`
+	LatencyDraftMs      int64     `json:"latency_draft_ms"`
+	LatencyCrmMs        int64     `json:"latency_crm_ms"`
+	LatencyStorageMs    int64     `json:"latency_storage_ms"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -78,5 +85,6 @@ type StatsSummary struct {
 	UnqualifiedLeads     int     `json:"unqualified_leads"`
 	DeduplicatedAccounts int     `json:"deduplicated_accounts"`
 	SuccessfulSyncs      int     `json:"successful_syncs"`
+	ContactedLeads       int     `json:"contacted_leads"`
 	AverageLatencyMs     float64 `json:"average_latency_ms"`
 }

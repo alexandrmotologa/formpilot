@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from '../components/Header';
 import { StatsBar } from '../components/StatsBar';
 import { LiveLeadFeed } from '../components/LiveLeadFeed';
 import { LeadDetailDrawer } from '../components/LeadDetailDrawer';
 import { InboundSimulator } from '../components/InboundSimulator';
 import { AccountsCacheModal } from '../components/AccountsCacheModal';
+import { SettingsModal } from '../components/SettingsModal';
+import { WebhookGatewayModal } from '../components/WebhookGatewayModal';
 import { Lead, StatsSummary, HealthInfo, AccountRecord, SyncLog, AuditEvent } from '../types';
 
 export const Dashboard: React.FC = () => {
@@ -18,8 +20,12 @@ export const Dashboard: React.FC = () => {
   const [sseConnected, setSseConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Modals
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isAccountsOpen, setIsAccountsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isWebhooksOpen, setIsWebhooksOpen] = useState(false);
 
   const fetchStats = async () => {
     try {
@@ -125,7 +131,7 @@ export const Dashboard: React.FC = () => {
           return [newLead, ...prev];
         });
 
-        // Auto select if first or currently inspecting
+        // Auto select if inspecting or first
         setSelectedLead((current) => {
           if (!current || current.id === newLead.id) {
             handleSelectLead(newLead);
@@ -137,7 +143,7 @@ export const Dashboard: React.FC = () => {
         fetchStats();
         fetchAccounts();
       } catch {
-        // ignore parse error
+        // ignore
       }
     });
 
@@ -153,6 +159,11 @@ export const Dashboard: React.FC = () => {
       } catch {
         // ignore
       }
+    });
+
+    eventSource.addEventListener('stats.updated', () => {
+      fetchLeads();
+      fetchStats();
     });
 
     return () => {
@@ -173,6 +184,48 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const handleRegenerateDraft = async (leadId: string, tone: string) => {
+    const res = await fetch(`/api/v1/leads/${leadId}/regenerate-draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tone }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setSelectedLead(updated);
+      setLeads((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+    }
+  };
+
+  const handleSendEmail = async (leadId: string) => {
+    const res = await fetch(`/api/v1/leads/${leadId}/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (res.ok) {
+      const leadRes = await fetch(`/api/v1/leads/${leadId}`);
+      if (leadRes.ok) {
+        const data = await leadRes.json();
+        handleSelectLead(data.lead);
+      }
+      fetchStats();
+    }
+  };
+
+  const handleOverrideDedup = async (leadId: string, action: string) => {
+    const res = await fetch(`/api/v1/leads/${leadId}/override-dedup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      handleSelectLead(updated);
+      fetchStats();
+    }
+  };
+
   const handleResync = async (leadId: string) => {
     const res = await fetch(`/api/v1/leads/${leadId}/sync`, {
       method: 'POST',
@@ -183,6 +236,10 @@ export const Dashboard: React.FC = () => {
       handleSelectLead(updated);
       fetchStats();
     }
+  };
+
+  const handleExport = (format: 'csv' | 'json') => {
+    window.open(`/api/v1/leads/export?format=${format}`, '_blank');
   };
 
   const handleSimulate = async (preset: string): Promise<Lead> => {
@@ -203,7 +260,6 @@ export const Dashboard: React.FC = () => {
       body: JSON.stringify({ sender, subject, body, source: 'cockpit_simulator' }),
     });
     const result = await res.json();
-    // fetch full lead
     const leadRes = await fetch(`/api/v1/leads/${result.lead_id}`);
     const fullLeadData = await leadRes.json();
     handleSelectLead(fullLeadData.lead);
@@ -217,6 +273,9 @@ export const Dashboard: React.FC = () => {
         sseConnected={sseConnected}
         onOpenSimulator={() => setIsSimulatorOpen(true)}
         onOpenAccounts={() => setIsAccountsOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenWebhooks={() => setIsWebhooksOpen(true)}
+        onExport={handleExport}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
       />
@@ -245,6 +304,9 @@ export const Dashboard: React.FC = () => {
               onClose={() => setSelectedLead(null)}
               onUpdateDraft={handleUpdateDraft}
               onResync={handleResync}
+              onRegenerateDraft={handleRegenerateDraft}
+              onSendEmail={handleSendEmail}
+              onOverrideDedup={handleOverrideDedup}
             />
           </div>
         </div>
@@ -261,6 +323,17 @@ export const Dashboard: React.FC = () => {
         isOpen={isAccountsOpen}
         onClose={() => setIsAccountsOpen(false)}
         accounts={accounts}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onRefreshStats={fetchStats}
+      />
+
+      <WebhookGatewayModal
+        isOpen={isWebhooksOpen}
+        onClose={() => setIsWebhooksOpen(false)}
       />
     </div>
   );
