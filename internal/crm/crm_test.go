@@ -2,6 +2,9 @@ package crm
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/alexandrmotologa/formpilot/internal/config"
@@ -53,5 +56,79 @@ func TestDispatcher_MockMode(t *testing.T) {
 	}
 	if !responses[0].Success {
 		t.Errorf("expected response to be successful")
+	}
+}
+
+func TestPipedriveClient_MockFallback(t *testing.T) {
+	client := NewPipedriveClient(config.PipedriveConfig{
+		Enabled:  true,
+		APIToken: "",
+	})
+
+	req := &CRMRequest{
+		LeadID:       "lead_pd_123",
+		CompanyName:  "Acme Corp",
+		ContactEmail: "buyer@acme.com",
+		Budget:       25000,
+	}
+
+	resp, err := client.Sync(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.CRMType != "pipedrive" {
+		t.Errorf("expected pipedrive, got %s", resp.CRMType)
+	}
+	if !resp.Success {
+		t.Errorf("expected success")
+	}
+}
+
+func TestPipedriveClient_LiveAPISimulated(t *testing.T) {
+	// Create mock test server mimicking Pipedrive REST API responses
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := r.URL.Query().Get("api_token")
+		if token != "valid_token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+
+		switch r.URL.Path {
+		case "/v1/organizations":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"data":    map[string]interface{}{"id": 1001},
+			})
+		case "/v1/persons":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"data":    map[string]interface{}{"id": 2002},
+			})
+		case "/v1/deals":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"data":    map[string]interface{}{"id": 3003},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	client := NewPipedriveClient(config.PipedriveConfig{
+		Enabled:  true,
+		APIToken: "valid_token",
+	})
+
+	// Test sendPost helper directly against the test server
+	orgID, err := client.sendPost(context.Background(), ts.URL+"/v1/organizations", map[string]string{"name": "Wayne Enterprises"})
+	if err != nil {
+		t.Fatalf("sendPost failed: %v", err)
+	}
+	if orgID != "1001" {
+		t.Errorf("expected 1001, got %s", orgID)
 	}
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   X,
+  ArrowLeft,
   Copy,
   Check,
   Send,
@@ -146,6 +147,13 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
       <div className="p-4 border-b border-slate-800 bg-slate-900/90 flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
+            <button
+              onClick={onClose}
+              className="lg:hidden inline-flex items-center gap-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded transition"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Feed</span>
+            </button>
             <h2 className="text-lg font-bold text-white tracking-tight">
               {lead.company_name || 'Inbound Lead'}
             </h2>

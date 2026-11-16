@@ -26,6 +26,7 @@ export const Dashboard: React.FC = () => {
   const [isAccountsOpen, setIsAccountsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isWebhooksOpen, setIsWebhooksOpen] = useState(false);
+  const [mobileView, setMobileView] = useState<'feed' | 'detail'>('feed');
 
   const fetchStats = async () => {
     try {
@@ -82,6 +83,7 @@ export const Dashboard: React.FC = () => {
 
   const handleSelectLead = async (lead: Lead) => {
     setSelectedLead(lead);
+    setMobileView('detail');
     try {
       const res = await fetch(`/api/v1/leads/${lead.id}`);
       if (res.ok) {
@@ -280,13 +282,38 @@ export const Dashboard: React.FC = () => {
         isRefreshing={isRefreshing}
       />
 
-      <main className="flex-1 overflow-hidden p-6 flex flex-col max-w-7xl mx-auto w-full">
+      <main className="flex-1 overflow-hidden p-3 sm:p-5 lg:p-6 flex flex-col max-w-7xl mx-auto w-full">
         <StatsBar stats={stats} />
+
+        {/* Mobile View Switcher (visible only on < lg screens) */}
+        <div className="flex lg:hidden items-center justify-between mb-3 bg-slate-900/90 border border-slate-800 rounded-lg p-1 shrink-0">
+          <button
+            onClick={() => setMobileView('feed')}
+            className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition ${
+              mobileView === 'feed'
+                ? 'bg-slate-800 text-white shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Inbound Feed ({leads.length})
+          </button>
+          <button
+            onClick={() => setMobileView('detail')}
+            disabled={!selectedLead}
+            className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition ${
+              mobileView === 'detail'
+                ? 'bg-slate-800 text-white shadow'
+                : 'text-slate-400 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed'
+            }`}
+          >
+            {selectedLead ? selectedLead.company_name || 'Lead Details' : 'Lead Details'}
+          </button>
+        </div>
 
         {/* Two-column responsive Cockpit workspace */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0">
           {/* Left: Real-time Inbound Feed (5 cols) */}
-          <div className="lg:col-span-5 h-full overflow-hidden">
+          <div className={`lg:col-span-5 h-full overflow-hidden ${mobileView === 'feed' ? 'block' : 'hidden lg:block'}`}>
             <LiveLeadFeed
               leads={leads}
               selectedLeadId={selectedLead?.id || null}
@@ -296,12 +323,15 @@ export const Dashboard: React.FC = () => {
           </div>
 
           {/* Right: Lead Detail Drawer & Outreach Studio (7 cols) */}
-          <div className="lg:col-span-7 h-full overflow-hidden">
+          <div className={`lg:col-span-7 h-full overflow-hidden ${mobileView === 'detail' ? 'block' : 'hidden lg:block'}`}>
             <LeadDetailDrawer
               lead={selectedLead}
               syncLogs={selectedLeadLogs}
               auditEvents={selectedLeadAudit}
-              onClose={() => setSelectedLead(null)}
+              onClose={() => {
+                setSelectedLead(null);
+                setMobileView('feed');
+              }}
               onUpdateDraft={handleUpdateDraft}
               onResync={handleResync}
               onRegenerateDraft={handleRegenerateDraft}
